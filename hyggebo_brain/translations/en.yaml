@@ -1,0 +1,31 @@
+configuration:
+  mqtt_host:
+    name: MQTT Host
+    description: EMQX broker hostname
+  mqtt_port:
+    name: MQTT Port
+    description: EMQX broker port
+  mqtt_user:
+    name: MQTT User
+    description: MQTT username
+  mqtt_password:
+    name: MQTT Password
+    description: MQTT password
+  pg_host:
+    name: PostgreSQL Host
+    description: PostgreSQL server hostname
+  pg_port:
+    name: PostgreSQL Port
+    description: PostgreSQL server port
+  pg_database:
+    name: Database Name
+    description: PostgreSQL database name
+  pg_user:
+    name: Database User
+    description: PostgreSQL username
+  pg_password:
+    name: Database Password
+    description: PostgreSQL password
+  log_level:
+    name: Log Level
+    description: Application log level

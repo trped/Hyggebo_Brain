@@ -1,0 +1,40 @@
+name: "Hyggebo Brain"
+description: "Smart home intelligence engine — sensor fusion, scenario detection, and autonomous control"
+version: "0.1.0"
+slug: "hyggebo_brain"
+url: "https://github.com/trped/Hyggebo_Brain"
+arch:
+  - aarch64
+  - amd64
+init: false
+homeassistant_api: true
+hassio_api: true
+ingress: true
+ingress_port: 8100
+panel_icon: "mdi:brain"
+panel_title: "Hyggebo Brain"
+map:
+  - config:ro
+  - ssl:ro
+options:
+  mqtt_host: "a0d7b954-emqx"
+  mqtt_port: 1883
+  mqtt_user: "admin"
+  mqtt_password: ""
+  pg_host: "db21ed7f-postgres-latest"
+  pg_port: 5432
+  pg_database: "hyggebo_brain"
+  pg_user: "brain_user"
+  pg_password: "brain_secure_2026"
+  log_level: "info"
+schema:
+  mqtt_host: str
+  mqtt_port: port
+  mqtt_user: str
+  mqtt_password: password
+  pg_host: str
+  pg_port: port
+  pg_database: str
+  pg_user: str
+  pg_password: password
+  log_level: list(debug|info|warning|error)
