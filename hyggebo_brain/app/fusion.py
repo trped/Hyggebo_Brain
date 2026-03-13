@@ -102,6 +102,30 @@ PERSON_ENTITIES = [
     "person.maria",
 ]
 
+# ── BLE proximity sensors (Bermuda integration) ─────────────
+# Maps person → room → distance sensor entity_id
+BLE_PROXIMITY: dict[str, dict[str, str]] = {
+    "person.troels": {
+        "alrum": "sensor.bermuda_troels_alrum_distance",
+        "koekken": "sensor.bermuda_troels_koekken_distance",
+        "sovevaerelse": "sensor.bermuda_troels_sovevaerelse_distance",
+    },
+    "person.hanne": {
+        "alrum": "sensor.bermuda_hanne_alrum_distance",
+        "koekken": "sensor.bermuda_hanne_koekken_distance",
+        "sovevaerelse": "sensor.bermuda_hanne_sovevaerelse_distance",
+    },
+}
+
+# Distance threshold in meters — closer than this counts as "in room"
+BLE_DISTANCE_THRESHOLD = 3.0
+
+# Build reverse lookup: BLE entity_id → (person, room_id)
+_BLE_ENTITY_MAP: dict[str, tuple[str, str]] = {}
+for _person, _rooms in BLE_PROXIMITY.items():
+    for _room, _entity in _rooms.items():
+        _BLE_ENTITY_MAP[_entity] = (_person, _room)
+
 # Build reverse lookup: entity_id → room_id
 _ENTITY_TO_ROOM: dict[str, str] = {}
 
@@ -145,6 +169,9 @@ class SensorFusion:
             for room in ROOM_MAPPING
         }
         self._person_states: dict[str, str] = {}  # person.x → home/not_home
+        # BLE proximity: (person, room) → distance in meters
+        self._ble_distances: dict[tuple[str, str], float] = {}
+        self._cmd_handler = None  # set via set_cmd_handler()
         self._running = False
 
     async def start(self) -> None:
@@ -224,6 +251,28 @@ class SensorFusion:
                 # Re-evaluate all rooms (person state affects sovevaerelse)
                 for room_id in ROOM_MAPPING:
                     self._compute_and_publish(room_id)
+            return
+
+        # BLE proximity sensor?
+        ble_info = _BLE_ENTITY_MAP.get(entity_id)
+        if ble_info:
+            person, ble_room = ble_info
+            try:
+                distance = float(new_state)
+            except (ValueError, TypeError):
+                distance = 999.0
+            old_dist = self._ble_distances.get((person, ble_room), 999.0)
+            self._ble_distances[(person, ble_room)] = distance
+            # Re-evaluate room if crossing threshold
+            old_in = old_dist < BLE_DISTANCE_THRESHOLD
+            new_in = distance < BLE_DISTANCE_THRESHOLD
+            if old_in != new_in:
+                logger.debug(
+                    "BLE %s in %s: %.1fm (threshold: %s)",
+                    person, ble_room, distance,
+                    "entered" if new_in else "left",
+                )
+                self._compute_and_publish(ble_room)
             return
 
         # Room-related entity?
@@ -314,21 +363,39 @@ class SensorFusion:
                     )
                 )
 
+    def _ble_in_room(self, room_id: str) -> list[str]:
+        """Return list of persons detected in room via BLE proximity."""
+        persons = []
+        for (person, ble_room), dist in self._ble_distances.items():
+            if ble_room == room_id and dist < BLE_DISTANCE_THRESHOLD:
+                persons.append(person)
+        return persons
+
     def _fuse_standard(
         self, room_id: str, cfg: dict, room: dict
     ) -> tuple[bool, str, dict]:
-        """Standard fusion: EPL main + zones + composite."""
+        """Standard fusion: EPL main + composite + BLE + zones + assumed_present."""
         epl_main = room.get("epl_main", False)
         composite = room.get("composite", False)
         any_zone = any(room.get("zones", {}).values())
         assumed = room.get("assumed_present", False)
+        ble_persons = self._ble_in_room(room_id)
 
-        # Priority: EPL main > composite > zones > assumed_present
+        # Check room override from command handler
+        if self._cmd_handler:
+            override = self._cmd_handler.get_room_override(room_id)
+            if override:
+                return override["occupancy"] == "occupied", "override", {}
+
+        # Priority: EPL main > composite > BLE > zones > assumed_present
         if epl_main:
             source = "epl_main"
             occupied = True
         elif composite:
             source = "composite"
+            occupied = True
+        elif ble_persons:
+            source = "ble_proximity"
             occupied = True
         elif any_zone:
             source = "epl_zone"
@@ -341,6 +408,8 @@ class SensorFusion:
             occupied = False
 
         attrs: dict[str, Any] = {}
+        if ble_persons:
+            attrs["ble_persons"] = ble_persons
 
         # Udestue special: add zone priority + target counts
         if room_id == "udestue":
@@ -356,26 +425,37 @@ class SensorFusion:
         return occupied, source, attrs
 
     def _fuse_sovevaerelse(self, room_id: str) -> tuple[bool, str, dict]:
-        """Sovevaerelse fusion: no EPL, use person + fallback signals."""
+        """Sovevaerelse fusion: no EPL, use BLE + person + fallback signals."""
         room = self._room_states[room_id]
+
+        # Check room override
+        if self._cmd_handler:
+            override = self._cmd_handler.get_room_override(room_id)
+            if override:
+                return override["occupancy"] == "occupied", "override", {}
+
+        # BLE proximity — strongest signal for sovevaerelse
+        ble_persons = self._ble_in_room(room_id)
+        if ble_persons:
+            return True, "ble_proximity", {"ble_persons": ble_persons}
 
         # Check if any person is home
         anyone_home = any(
             s == "home" for s in self._person_states.values()
         )
 
-        # Check fallback signals (climate/light state changes as proxy)
-        # For v1, we rely on person state + composite if available
         composite = room.get("composite", False)
 
         if composite:
             return True, "composite", {}
         elif anyone_home:
-            # Sovevaerelse is "possible" when someone is home,
-            # but we mark it clear unless we have stronger signal
             return False, "person_home_no_signal", {"anyone_home": True}
         else:
             return False, "none", {"anyone_home": False}
+
+    def set_cmd_handler(self, cmd_handler) -> None:
+        """Inject command handler for room overrides."""
+        self._cmd_handler = cmd_handler
 
     # ── Public accessors ─────────────────────────────────────
 

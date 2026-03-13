@@ -13,11 +13,13 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from cmd_handler import CommandHandler
     from event_logger import EventLogger
     from fusion import SensorFusion
     from ha_client import HAClient
     from ha_state import HAStateTracker
     from mqtt_client import MQTTClient
+    from notifications import NotificationService
 
 logger = logging.getLogger("hyggebo_brain.scenarios")
 
@@ -163,12 +165,16 @@ class ScenarioEngine:
         ha: "HAClient",
         mqtt: "MQTTClient",
         event_logger: "EventLogger | None" = None,
+        cmd_handler: "CommandHandler | None" = None,
+        notifier: "NotificationService | None" = None,
     ) -> None:
         self._fusion = fusion
         self._ha_state = ha_state
         self._ha = ha
         self._mqtt = mqtt
         self._event_logger = event_logger
+        self._cmd_handler = cmd_handler
+        self._notifier = notifier
         self._running = False
         self._eval_task: asyncio.Task | None = None
         # Track cooldowns: rule_id → last trigger time
@@ -230,12 +236,20 @@ class ScenarioEngine:
                 logger.exception("Error evaluating rule %s", rule_id)
                 continue
 
+            # Check if rule is disabled via command handler
+            if self._cmd_handler and self._cmd_handler.is_rule_disabled(rule_id):
+                continue
+
             # Condition matched — execute actions
             logger.info("Scenario triggered: %s (%s)", rule["name"], rule_id)
             self._last_triggered[rule_id] = now
 
             for action in rule["actions"]:
                 await self._execute_action(rule_id, action)
+
+            # Send notification
+            if self._notifier:
+                await self._notifier.notify_scenario(rule_id, rule["name"])
 
             # Log event
             if self._event_logger:
