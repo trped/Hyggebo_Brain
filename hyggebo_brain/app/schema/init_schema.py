@@ -52,6 +52,53 @@ CREATE TABLE IF NOT EXISTS events (
     data        JSONB NOT NULL DEFAULT '{}',
     room_id     TEXT
 ) PARTITION BY RANGE (ts);
+
+-- Automation rules (user-created via dashboard)
+CREATE TABLE IF NOT EXISTS automation_rules (
+    id          SERIAL PRIMARY KEY,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+    -- Trigger conditions (JSON)
+    conditions  JSONB NOT NULL DEFAULT '[]',
+    -- Actions to execute
+    actions     JSONB NOT NULL DEFAULT '[]',
+    -- Cooldown between triggers (seconds)
+    cooldown    INTEGER NOT NULL DEFAULT 300,
+    -- ML confidence score (0.0 = user-created, >0 = ML-suggested)
+    ml_score    DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    -- Source: 'user', 'ml_suggested', 'ml_auto'
+    source      TEXT NOT NULL DEFAULT 'user',
+    -- Stats
+    trigger_count   INTEGER NOT NULL DEFAULT 0,
+    last_triggered  TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Activity patterns (learned from occupancy history)
+CREATE TABLE IF NOT EXISTS activity_patterns (
+    id          SERIAL PRIMARY KEY,
+    room_id     TEXT NOT NULL REFERENCES rooms(room_id),
+    day_of_week INTEGER NOT NULL,  -- 0=Monday, 6=Sunday
+    hour        INTEGER NOT NULL,  -- 0-23
+    -- Aggregated stats
+    occupancy_pct   DOUBLE PRECISION NOT NULL DEFAULT 0.0,  -- % of time occupied
+    avg_duration    DOUBLE PRECISION NOT NULL DEFAULT 0.0,  -- avg minutes occupied
+    sample_count    INTEGER NOT NULL DEFAULT 0,
+    -- Common sources and persons
+    common_sources  JSONB NOT NULL DEFAULT '{}',
+    common_persons  JSONB NOT NULL DEFAULT '[]',
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (room_id, day_of_week, hour)
+);
+
+-- ML model state (store trained model parameters)
+CREATE TABLE IF NOT EXISTS ml_state (
+    key         TEXT PRIMARY KEY,
+    value       JSONB NOT NULL DEFAULT '{}',
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 """
 
 # ── Seed data ──────────────────────────────────────────────────────
