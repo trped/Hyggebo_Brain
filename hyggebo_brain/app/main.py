@@ -40,7 +40,7 @@ logger = logging.getLogger("hyggebo_brain")
 
 app = FastAPI(
     title="Hyggebo Brain",
-    version="0.3.0",
+    version="0.4.0",
     description="Smart home intelligence engine",
 )
 
@@ -79,7 +79,7 @@ async def startup():
     global event_logger, fusion, ha_state_tracker, scenario_engine
     global cmd_handler, notifier, rule_manager, activity_tracker, ml_engine
 
-    logger.info("Hyggebo Brain v0.3.0 starting...")
+    logger.info("Hyggebo Brain v0.4.0 starting...")
 
     # 1. Database
     try:
@@ -105,7 +105,7 @@ async def startup():
     # 3. MQTT (EMQX)
     try:
         await mqtt.connect()
-        mqtt.publish_sensor("system", "starting", {"version": "0.3.0"})
+        mqtt.publish_sensor("system", "starting", {"version": "0.4.0"})
         logger.info("MQTT connected to EMQX")
     except Exception as e:
         logger.error(f"MQTT connection failed: {e}")
@@ -214,11 +214,11 @@ async def startup():
 
     # Mark system online
     if mqtt.connected:
-        mqtt.publish_sensor("system", "online", {"version": "0.3.0"})
+        mqtt.publish_sensor("system", "online", {"version": "0.4.0"})
 
     # Startup notification
     if notifier:
-        await notifier.notify_system("system_started", "Hyggebo Brain v0.3.0 er startet")
+        await notifier.notify_system("system_started", "Hyggebo Brain v0.4.0 er startet")
 
     logger.info("Startup complete.")
 

@@ -19,8 +19,8 @@ DEVICE_INFO = {
     "identifiers": ["hyggebo_brain"],
     "name": "Hyggebo Brain",
     "manufacturer": "Hyggebo",
-    "model": "Brain v0.3",
-    "sw_version": "0.3.0",
+    "model": "Brain v0.4",
+    "sw_version": "0.4.0",
 }
 
 # Rooms that get occupancy sensors
