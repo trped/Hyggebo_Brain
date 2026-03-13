@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from event_logger import EventLogger
     from ha_client import HAClient
     from mqtt_client import MQTTClient
 
@@ -129,9 +130,15 @@ _build_entity_index()
 class SensorFusion:
     """Fuses EPL mmWave, person, and BLE signals into room occupancy."""
 
-    def __init__(self, ha: "HAClient", mqtt: "MQTTClient") -> None:
+    def __init__(
+        self,
+        ha: "HAClient",
+        mqtt: "MQTTClient",
+        event_logger: "EventLogger | None" = None,
+    ) -> None:
         self._ha = ha
         self._mqtt = mqtt
+        self._event_logger = event_logger
         # Per-room state cache
         self._room_states: dict[str, dict[str, Any]] = {
             room: {"occupancy": "clear", "source": "init", "zones": {}}
@@ -294,6 +301,18 @@ class SensorFusion:
                 "Room %s: %s → %s (source: %s)",
                 room_id, old_occupancy, room["occupancy"], source,
             )
+            # Persist to database
+            if self._event_logger:
+                import asyncio
+                asyncio.create_task(
+                    self._event_logger.log_occupancy_change(
+                        room_id=room_id,
+                        old_state=old_occupancy,
+                        new_state=room["occupancy"],
+                        source=source,
+                        attrs=attrs,
+                    )
+                )
 
     def _fuse_standard(
         self, room_id: str, cfg: dict, room: dict

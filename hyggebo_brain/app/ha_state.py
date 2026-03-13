@@ -8,6 +8,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from event_logger import EventLogger
     from ha_client import HAClient
     from mqtt_client import MQTTClient
 
@@ -31,9 +32,15 @@ class HAStateTracker:
       - hyggebo_brain/sensor/tid_pa_dagen/state
     """
 
-    def __init__(self, ha: "HAClient", mqtt: "MQTTClient") -> None:
+    def __init__(
+        self,
+        ha: "HAClient",
+        mqtt: "MQTTClient",
+        event_logger: "EventLogger | None" = None,
+    ) -> None:
         self._ha = ha
         self._mqtt = mqtt
+        self._event_logger = event_logger
 
         # Current tracked values
         self._hus_tilstand: str = "unknown"
@@ -124,6 +131,13 @@ class HAStateTracker:
             logger.info(
                 "hus_tilstand changed: %s → %s", old_value, new_value
             )
+            if self._event_logger:
+                import asyncio
+                asyncio.create_task(
+                    self._event_logger.log_house_state_change(
+                        HUS_TILSTAND_ENTITY, old_value, new_value
+                    )
+                )
 
     def _update_tid_pa_dagen(self, state_obj: dict) -> None:
         """Update tid_pa_dagen from HA state object and publish."""
@@ -145,6 +159,13 @@ class HAStateTracker:
             logger.info(
                 "tid_pa_dagen changed: %s → %s", old_value, new_value
             )
+            if self._event_logger:
+                import asyncio
+                asyncio.create_task(
+                    self._event_logger.log_house_state_change(
+                        TID_PA_DAGEN_ENTITY, old_value, new_value
+                    )
+                )
 
     # ── MQTT publishing ──────────────────────────────────────────
 
