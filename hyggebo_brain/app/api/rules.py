@@ -26,14 +26,18 @@ class RuleUpdate(BaseModel):
 @router.get("/rules")
 async def list_rules(request: Request, source: str | None = None):
     """List all automation rules."""
-    rm = request.app.state.rule_manager
+    rm = getattr(request.app.state, "rule_manager", None)
+    if not rm:
+        raise HTTPException(503, "Rule manager not available")
     return await rm.list_rules(source=source)
 
 
 @router.get("/rules/{rule_id}")
 async def get_rule(request: Request, rule_id: int):
     """Get a single rule."""
-    rm = request.app.state.rule_manager
+    rm = getattr(request.app.state, "rule_manager", None)
+    if not rm:
+        raise HTTPException(503, "Rule manager not available")
     rule = await rm.get_rule(rule_id)
     if not rule:
         raise HTTPException(404, "Rule not found")
@@ -43,7 +47,9 @@ async def get_rule(request: Request, rule_id: int):
 @router.post("/rules", status_code=201)
 async def create_rule(request: Request, body: RuleCreate):
     """Create a new automation rule."""
-    rm = request.app.state.rule_manager
+    rm = getattr(request.app.state, "rule_manager", None)
+    if not rm:
+        raise HTTPException(503, "Rule manager not available")
     return await rm.create_rule(
         name=body.name,
         description=body.description,
@@ -58,7 +64,9 @@ async def create_rule(request: Request, body: RuleCreate):
 @router.put("/rules/{rule_id}")
 async def update_rule(request: Request, rule_id: int, body: RuleUpdate):
     """Update an existing rule."""
-    rm = request.app.state.rule_manager
+    rm = getattr(request.app.state, "rule_manager", None)
+    if not rm:
+        raise HTTPException(503, "Rule manager not available")
     fields = body.model_dump(exclude_none=True)
     if not fields:
         raise HTTPException(400, "No fields to update")
@@ -71,7 +79,9 @@ async def update_rule(request: Request, rule_id: int, body: RuleUpdate):
 @router.delete("/rules/{rule_id}")
 async def delete_rule(request: Request, rule_id: int):
     """Delete an automation rule."""
-    rm = request.app.state.rule_manager
+    rm = getattr(request.app.state, "rule_manager", None)
+    if not rm:
+        raise HTTPException(503, "Rule manager not available")
     if not await rm.delete_rule(rule_id):
         raise HTTPException(404, "Rule not found")
     return {"ok": True}
@@ -80,7 +90,9 @@ async def delete_rule(request: Request, rule_id: int):
 @router.post("/rules/{rule_id}/toggle")
 async def toggle_rule(request: Request, rule_id: int, enabled: bool = True):
     """Enable or disable a rule."""
-    rm = request.app.state.rule_manager
+    rm = getattr(request.app.state, "rule_manager", None)
+    if not rm:
+        raise HTTPException(503, "Rule manager not available")
     result = await rm.toggle_rule(rule_id, enabled)
     if not result:
         raise HTTPException(404, "Rule not found")
@@ -90,14 +102,18 @@ async def toggle_rule(request: Request, rule_id: int, enabled: bool = True):
 @router.get("/ml/suggestions")
 async def ml_suggestions(request: Request):
     """Get ML-suggested rules (not yet approved)."""
-    rm = request.app.state.rule_manager
+    rm = getattr(request.app.state, "rule_manager", None)
+    if not rm:
+        raise HTTPException(503, "Rule manager not available")
     return await rm.get_ml_suggestions()
 
 
 @router.post("/ml/suggestions/{rule_id}/approve")
 async def approve_suggestion(request: Request, rule_id: int):
     """Approve an ML suggestion (enables it)."""
-    rm = request.app.state.rule_manager
+    rm = getattr(request.app.state, "rule_manager", None)
+    if not rm:
+        raise HTTPException(503, "Rule manager not available")
     rule = await rm.get_rule(rule_id)
     if not rule:
         raise HTTPException(404, "Suggestion not found")

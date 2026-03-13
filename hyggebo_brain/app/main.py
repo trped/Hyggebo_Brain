@@ -41,7 +41,7 @@ logger = logging.getLogger("hyggebo_brain")
 
 app = FastAPI(
     title="Hyggebo Brain",
-    version="0.6.0",
+    version="0.7.0",
     description="Smart home intelligence engine",
 )
 
@@ -81,7 +81,7 @@ async def startup():
     global event_logger, fusion, ha_state_tracker, scenario_engine
     global cmd_handler, notifier, rule_manager, activity_tracker, ml_engine
 
-    logger.info("Hyggebo Brain v0.6.0 starting...")
+    logger.info("Hyggebo Brain v0.7.0 starting...")
 
     # 1. Database
     try:
@@ -107,8 +107,8 @@ async def startup():
     # 2c. Seed default automation rules (always, regardless of HA/MQTT)
     try:
         from scenarios import DEFAULT_RULES
-        existing = await rule_manager.list_rules()
-        if not existing:
+        existing_defaults = await rule_manager.list_rules(source="default")
+        if not existing_defaults:
             logger.info("Seeding %d default automation rules...", len(DEFAULT_RULES))
             for rule in DEFAULT_RULES:
                 await rule_manager.create_rule(
@@ -119,14 +119,16 @@ async def startup():
                     cooldown=rule["cooldown"],
                     source="default",
                 )
-            logger.info("Default rules seeded")
+            logger.info("Default rules seeded to DB")
+        else:
+            logger.info("Found %d existing default rules in DB", len(existing_defaults))
     except Exception as e:
         logger.error(f"Failed to seed default rules: {e}")
 
     # 3. MQTT (EMQX)
     try:
         await mqtt.connect()
-        mqtt.publish_sensor("system", "starting", {"version": "0.6.0"})
+        mqtt.publish_sensor("system", "starting", {"version": "0.7.0"})
         logger.info("MQTT connected to EMQX")
     except Exception as e:
         logger.error(f"MQTT connection failed: {e}")
@@ -236,11 +238,11 @@ async def startup():
 
     # Mark system online
     if mqtt.connected:
-        mqtt.publish_sensor("system", "online", {"version": "0.6.0"})
+        mqtt.publish_sensor("system", "online", {"version": "0.7.0"})
 
     # Startup notification
     if notifier:
-        await notifier.notify_system("system_started", "Hyggebo Brain v0.6.0 er startet")
+        await notifier.notify_system("system_started", "Hyggebo Brain v0.7.0 er startet")
 
     logger.info("Startup complete.")
 
