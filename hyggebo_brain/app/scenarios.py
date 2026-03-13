@@ -5,6 +5,9 @@ Evaluates rules based on:
   - House state: hus_tilstand (hjemme/nat/ude/kun_hunde/ferie)
   - Time of day: tid_pa_dagen (morgen/dag/aften/nat)
 
+Rules are loaded from the database (automation_rules table).
+On first startup, seeds 7 default rules if the table is empty.
+
 When a scenario matches, triggers HA service calls via HAClient.
 """
 import asyncio
@@ -20,135 +23,101 @@ if TYPE_CHECKING:
     from ha_state import HAStateTracker
     from mqtt_client import MQTTClient
     from notifications import NotificationService
+    from rule_manager import RuleManager
 
 logger = logging.getLogger("hyggebo_brain.scenarios")
 
-# ── Scenario rules ────────────────────────────────────────────
-# Each rule: condition function → list of actions
-# Actions are HA service calls: (domain, service, data, target)
-
-SCENARIO_RULES: list[dict[str, Any]] = [
-    # 1. Alle ude → sluk alt lys
+# ── Default rules (seeded to DB on first run) ────────────────
+DEFAULT_RULES: list[dict[str, Any]] = [
     {
-        "id": "alle_ude_lys_fra",
         "name": "Alle ude — sluk lys",
-        "condition": lambda ctx: (
-            ctx["hus_tilstand"] == "ude"
-            and not any(
-                r["occupancy"] == "occupied"
-                for r in ctx["rooms"].values()
-            )
-        ),
-        "actions": [
-            {
-                "domain": "light",
-                "service": "turn_off",
-                "target": {"entity_id": "all"},
-            },
+        "description": "Slukker alt lys naar huset er tomt og alle er ude",
+        "conditions": [
+            {"type": "state", "value": "ude"},
+            {"type": "all_rooms_clear"},
         ],
-        "cooldown": 300,  # seconds between re-triggers
+        "actions": [
+            {"type": "ha_service", "service": "light.turn_off",
+             "data": {"entity_id": "all"}},
+        ],
+        "cooldown": 300,
     },
-    # 2. Nat + ingen i alrum → sluk alrum lys
     {
-        "id": "nat_alrum_lys_fra",
         "name": "Nat — alrum tomt, sluk lys",
-        "condition": lambda ctx: (
-            ctx["tid_pa_dagen"] == "nat"
-            and ctx["rooms"].get("alrum", {}).get("occupancy") == "clear"
-        ),
+        "description": "Slukker alrum lys om natten naar rummet er tomt",
+        "conditions": [
+            {"type": "time_of_day", "value": "nat"},
+            {"type": "room_empty", "room_id": "alrum"},
+        ],
         "actions": [
-            {
-                "domain": "light",
-                "service": "turn_off",
-                "target": {"entity_id": "light.alrum"},
-            },
+            {"type": "ha_service", "service": "light.turn_off",
+             "data": {"entity_id": "light.alrum"}},
         ],
         "cooldown": 600,
     },
-    # 3. Nat + ingen i køkken → sluk køkken lys
     {
-        "id": "nat_koekken_lys_fra",
-        "name": "Nat — køkken tomt, sluk lys",
-        "condition": lambda ctx: (
-            ctx["tid_pa_dagen"] == "nat"
-            and ctx["rooms"].get("koekken", {}).get("occupancy") == "clear"
-        ),
+        "name": "Nat — koekken tomt, sluk lys",
+        "description": "Slukker koekken lys om natten naar rummet er tomt",
+        "conditions": [
+            {"type": "time_of_day", "value": "nat"},
+            {"type": "room_empty", "room_id": "koekken"},
+        ],
         "actions": [
-            {
-                "domain": "light",
-                "service": "turn_off",
-                "target": {"entity_id": "light.kokken"},
-            },
+            {"type": "ha_service", "service": "light.turn_off",
+             "data": {"entity_id": "light.kokken"}},
         ],
         "cooldown": 600,
     },
-    # 4. Ferie → sluk alt og sæt klimaanlæg til eco
     {
-        "id": "ferie_mode",
         "name": "Ferie — energisparing",
-        "condition": lambda ctx: ctx["hus_tilstand"] == "ferie",
+        "description": "Slukker alt lys og saetter klima til eco ved ferie",
+        "conditions": [
+            {"type": "state", "value": "ferie"},
+        ],
         "actions": [
-            {
-                "domain": "light",
-                "service": "turn_off",
-                "target": {"entity_id": "all"},
-            },
-            {
-                "domain": "climate",
-                "service": "set_preset_mode",
-                "data": {"preset_mode": "eco"},
-                "target": {"entity_id": "climate.sovevarelse"},
-            },
+            {"type": "ha_service", "service": "light.turn_off",
+             "data": {"entity_id": "all"}},
+            {"type": "ha_service", "service": "climate.set_preset_mode",
+             "data": {"preset_mode": "eco", "entity_id": "climate.sovevarelse"}},
         ],
         "cooldown": 3600,
     },
-    # 5. Kun hunde → lys i gang tændt (natlys)
     {
-        "id": "kun_hunde_gang_lys",
         "name": "Kun hunde — gang natlys",
-        "condition": lambda ctx: ctx["hus_tilstand"] == "kun_hunde",
+        "description": "Taender svagt lys i gangen naar kun hundene er hjemme",
+        "conditions": [
+            {"type": "state", "value": "kun_hunde"},
+        ],
         "actions": [
-            {
-                "domain": "light",
-                "service": "turn_on",
-                "data": {"brightness_pct": 10},
-                "target": {"entity_id": "light.gang"},
-            },
+            {"type": "ha_service", "service": "light.turn_on",
+             "data": {"brightness_pct": 10, "entity_id": "light.gang"}},
         ],
         "cooldown": 1800,
     },
-    # 6. Morgen + nogen i køkken → tænd køkken lys
     {
-        "id": "morgen_koekken_lys",
-        "name": "Morgen — køkken belægning, tænd lys",
-        "condition": lambda ctx: (
-            ctx["tid_pa_dagen"] == "morgen"
-            and ctx["rooms"].get("koekken", {}).get("occupancy") == "occupied"
-        ),
+        "name": "Morgen — koekken belaegning, taend lys",
+        "description": "Taender koekken lys om morgenen naar der er nogen",
+        "conditions": [
+            {"type": "time_of_day", "value": "morgen"},
+            {"type": "room_occupied", "room_id": "koekken"},
+        ],
         "actions": [
-            {
-                "domain": "light",
-                "service": "turn_on",
-                "target": {"entity_id": "light.kokken"},
-            },
+            {"type": "ha_service", "service": "light.turn_on",
+             "data": {"entity_id": "light.kokken"}},
         ],
         "cooldown": 600,
     },
-    # 7. Aften + nogen i udestue → tænd hyggelig belysning
     {
-        "id": "aften_udestue_hygge",
         "name": "Aften — udestue hyggelys",
-        "condition": lambda ctx: (
-            ctx["tid_pa_dagen"] == "aften"
-            and ctx["rooms"].get("udestue", {}).get("occupancy") == "occupied"
-        ),
+        "description": "Taender hyggeligt lys i udestuen om aftenen",
+        "conditions": [
+            {"type": "time_of_day", "value": "aften"},
+            {"type": "room_occupied", "room_id": "udestue"},
+        ],
         "actions": [
-            {
-                "domain": "light",
-                "service": "turn_on",
-                "data": {"brightness_pct": 40, "color_temp_kelvin": 2700},
-                "target": {"entity_id": "light.udestue"},
-            },
+            {"type": "ha_service", "service": "light.turn_on",
+             "data": {"brightness_pct": 40, "color_temp_kelvin": 2700,
+                      "entity_id": "light.udestue"}},
         ],
         "cooldown": 900,
     },
@@ -156,7 +125,7 @@ SCENARIO_RULES: list[dict[str, Any]] = [
 
 
 class ScenarioEngine:
-    """Evaluates scenario rules and triggers HA actions."""
+    """Evaluates scenario rules from DB and triggers HA actions."""
 
     def __init__(
         self,
@@ -167,6 +136,7 @@ class ScenarioEngine:
         event_logger: "EventLogger | None" = None,
         cmd_handler: "CommandHandler | None" = None,
         notifier: "NotificationService | None" = None,
+        rule_manager: "RuleManager | None" = None,
     ) -> None:
         self._fusion = fusion
         self._ha_state = ha_state
@@ -175,21 +145,29 @@ class ScenarioEngine:
         self._event_logger = event_logger
         self._cmd_handler = cmd_handler
         self._notifier = notifier
+        self._rule_manager = rule_manager
         self._running = False
         self._eval_task: asyncio.Task | None = None
-        # Track cooldowns: rule_id → last trigger time
-        self._last_triggered: dict[str, float] = {}
+        self._last_triggered: dict[int, float] = {}
+        self._cached_rules: list[dict] = []
+        self._rules_loaded_at: float = 0
+        self._eval_count: int = 0
+        self._trigger_count: int = 0
 
     async def start(self) -> None:
-        """Start periodic scenario evaluation."""
+        """Seed default rules if needed, load rules, start eval loop."""
+        if self._rule_manager:
+            await self._seed_defaults()
+            await self._reload_rules()
+
         self._running = True
         self._eval_task = asyncio.create_task(self._eval_loop())
         logger.info(
-            "Scenario engine started with %d rules", len(SCENARIO_RULES)
+            "Scenario engine started with %d rules from DB",
+            len(self._cached_rules),
         )
 
     async def stop(self) -> None:
-        """Stop scenario evaluation."""
         self._running = False
         if self._eval_task and not self._eval_task.done():
             self._eval_task.cancel()
@@ -199,18 +177,43 @@ class ScenarioEngine:
                 pass
         logger.info("Scenario engine stopped")
 
+    async def _seed_defaults(self) -> None:
+        """Seed default rules into DB if automation_rules is empty."""
+        existing = await self._rule_manager.list_rules()
+        if existing:
+            return
+
+        logger.info("Seeding %d default automation rules...", len(DEFAULT_RULES))
+        for rule in DEFAULT_RULES:
+            await self._rule_manager.create_rule(
+                name=rule["name"],
+                description=rule["description"],
+                conditions=rule["conditions"],
+                actions=rule["actions"],
+                cooldown=rule["cooldown"],
+                source="default",
+            )
+        logger.info("Default rules seeded")
+
+    async def _reload_rules(self) -> None:
+        if self._rule_manager:
+            self._cached_rules = await self._rule_manager.get_active_rules()
+            self._rules_loaded_at = datetime.now(timezone.utc).timestamp()
+
     async def _eval_loop(self) -> None:
-        """Evaluate all rules every 10 seconds."""
         while self._running:
             try:
+                now = datetime.now(timezone.utc).timestamp()
+                if now - self._rules_loaded_at > 60:
+                    await self._reload_rules()
                 await self._evaluate_all()
             except Exception:
                 logger.exception("Scenario evaluation error")
             await asyncio.sleep(10)
 
     async def _evaluate_all(self) -> None:
-        """Build context and evaluate each rule."""
         now = datetime.now(timezone.utc).timestamp()
+        self._eval_count += 1
 
         ctx = {
             "rooms": self._fusion.get_all_states(),
@@ -219,39 +222,33 @@ class ScenarioEngine:
             "tid_pa_dagen": self._ha_state.tid_pa_dagen,
         }
 
-        for rule in SCENARIO_RULES:
+        for rule in self._cached_rules:
             rule_id = rule["id"]
             cooldown = rule.get("cooldown", 300)
 
-            # Check cooldown
             last = self._last_triggered.get(rule_id, 0)
             if now - last < cooldown:
                 continue
 
-            # Evaluate condition
-            try:
-                if not rule["condition"](ctx):
-                    continue
-            except Exception:
-                logger.exception("Error evaluating rule %s", rule_id)
+            if self._cmd_handler and self._cmd_handler.is_rule_disabled(str(rule_id)):
                 continue
 
-            # Check if rule is disabled via command handler
-            if self._cmd_handler and self._cmd_handler.is_rule_disabled(rule_id):
+            if not self._evaluate_conditions(rule.get("conditions", []), ctx):
                 continue
 
-            # Condition matched — execute actions
-            logger.info("Scenario triggered: %s (%s)", rule["name"], rule_id)
+            logger.info("Rule triggered: #%d %s", rule_id, rule["name"])
             self._last_triggered[rule_id] = now
+            self._trigger_count += 1
 
-            for action in rule["actions"]:
-                await self._execute_action(rule_id, action)
+            for action in rule.get("actions", []):
+                await self._execute_action(rule_id, rule["name"], action)
 
-            # Send notification
+            if self._rule_manager:
+                await self._rule_manager.record_trigger(rule_id)
+
             if self._notifier:
-                await self._notifier.notify_scenario(rule_id, rule["name"])
+                await self._notifier.notify_scenario(str(rule_id), rule["name"])
 
-            # Log event
             if self._event_logger:
                 await self._event_logger.log_event(
                     event_type="scenario_triggered",
@@ -264,41 +261,108 @@ class ScenarioEngine:
                     },
                 )
 
-            # Publish to MQTT
             self._mqtt.publish_event("scenario_triggered", {
                 "rule_id": rule_id,
                 "name": rule["name"],
             })
 
-    async def _execute_action(self, rule_id: str, action: dict) -> None:
-        """Execute a single HA service call."""
-        domain = action["domain"]
-        service = action["service"]
-        data = action.get("data")
-        target = action.get("target")
+    def _evaluate_conditions(self, conditions: list, ctx: dict) -> bool:
+        """Evaluate all conditions (AND logic)."""
+        if not conditions:
+            return False
 
-        try:
-            await self._ha.call_service(domain, service, data=data, target=target)
-            logger.info(
-                "Action executed: %s.%s (rule: %s)",
-                domain, service, rule_id,
-            )
-        except Exception:
-            logger.exception(
-                "Action failed: %s.%s (rule: %s)",
-                domain, service, rule_id,
-            )
+        for cond in conditions:
+            ctype = cond.get("type", "")
+
+            if ctype == "state":
+                if ctx["hus_tilstand"] != cond.get("value"):
+                    return False
+            elif ctype == "time_of_day":
+                if ctx["tid_pa_dagen"] != cond.get("value"):
+                    return False
+            elif ctype == "time":
+                if datetime.now().hour != cond.get("hour"):
+                    return False
+                if "day_of_week" in cond:
+                    if datetime.now().weekday() != cond["day_of_week"]:
+                        return False
+            elif ctype == "room_occupied":
+                room = ctx["rooms"].get(cond.get("room_id", ""), {})
+                if room.get("occupancy") != "occupied":
+                    return False
+            elif ctype == "room_empty":
+                room = ctx["rooms"].get(cond.get("room_id", ""), {})
+                if room.get("occupancy") != "clear":
+                    return False
+            elif ctype == "all_rooms_clear":
+                if any(r.get("occupancy") == "occupied"
+                       for r in ctx["rooms"].values()):
+                    return False
+            elif ctype == "person_home":
+                if ctx["persons"].get(cond.get("person_id", "")) != "home":
+                    return False
+            elif ctype == "person_away":
+                if ctx["persons"].get(cond.get("person_id", "")) != "not_home":
+                    return False
+            else:
+                return False
+
+        return True
+
+    async def _execute_action(self, rule_id: int, rule_name: str, action: dict) -> None:
+        atype = action.get("type", "")
+
+        if atype == "ha_service":
+            service_str = action.get("service", "")
+            data = dict(action.get("data", {}))
+
+            if "." in service_str:
+                domain, service = service_str.split(".", 1)
+            else:
+                logger.warning("Invalid service format: %s", service_str)
+                return
+
+            target = None
+            if "entity_id" in data:
+                target = {"entity_id": data.pop("entity_id")}
+
+            try:
+                await self._ha.call_service(domain, service, data=data or None, target=target)
+                logger.info("Action: %s.%s (rule #%d)", domain, service, rule_id)
+            except Exception:
+                logger.exception("Action failed: %s.%s (rule #%d)", domain, service, rule_id)
+
+        elif atype == "notify":
+            if self._notifier:
+                await self._notifier.notify_scenario(
+                    str(rule_id), action.get("message", rule_name)
+                )
+
+        elif atype == "mqtt_publish":
+            topic = action.get("topic", "")
+            payload = action.get("payload", "")
+            if topic:
+                self._mqtt.publish_event(topic, {"payload": payload})
 
     # ── Public accessors ──────────────────────────────────────
 
     def get_rules_summary(self) -> list[dict]:
-        """Return summary of all rules and their last trigger times."""
         return [
             {
                 "id": rule["id"],
                 "name": rule["name"],
                 "cooldown": rule.get("cooldown", 300),
                 "last_triggered": self._last_triggered.get(rule["id"]),
+                "enabled": rule.get("enabled", True),
+                "source": rule.get("source", "user"),
             }
-            for rule in SCENARIO_RULES
+            for rule in self._cached_rules
         ]
+
+    def get_stats(self) -> dict:
+        return {
+            "eval_count": self._eval_count,
+            "trigger_count": self._trigger_count,
+            "cached_rules": len(self._cached_rules),
+            "rules_loaded_at": self._rules_loaded_at,
+        }

@@ -15,6 +15,7 @@ from api.rooms import router as rooms_router
 from api.events import router as events_router
 from api.scenarios import router as scenarios_router
 from api.rules import router as rules_router
+from api.system import router as system_router
 from activity_tracker import ActivityTracker
 from cmd_handler import CommandHandler
 from database import Database
@@ -50,6 +51,7 @@ app.include_router(rooms_router, prefix="/api")
 app.include_router(events_router, prefix="/api")
 app.include_router(scenarios_router, prefix="/api")
 app.include_router(rules_router, prefix="/api")
+app.include_router(system_router, prefix="/api")
 
 # Shared service instances
 db = Database(settings)
@@ -184,6 +186,7 @@ async def startup():
                 event_logger=event_logger,
                 cmd_handler=cmd_handler,
                 notifier=notifier,
+                rule_manager=rule_manager,
             )
             await scenario_engine.start()
             # Wire scenario engine into command handler
