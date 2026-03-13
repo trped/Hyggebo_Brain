@@ -1,6 +1,6 @@
 name: "Hyggebo Brain"
 description: "Smart home intelligence engine — sensor fusion, scenario detection, and autonomous control"
-version: "0.5.0"
+version: "0.6.0"
 slug: "hyggebo_brain"
 url: "https://github.com/trped/Hyggebo_Brain"
 arch:

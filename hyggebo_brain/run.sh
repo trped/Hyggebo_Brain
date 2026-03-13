@@ -17,7 +17,7 @@ if [ -z "${SUPERVISOR_TOKEN:-}" ]; then
     export SUPERVISOR_TOKEN=$(cat /run/s6/container_environment/SUPERVISOR_TOKEN 2>/dev/null || echo "")
 fi
 
-bashio::log.info "Starting Hyggebo Brain v0.5.0..."
+bashio::log.info "Starting Hyggebo Brain v0.6.0..."
 bashio::log.info "PostgreSQL: ${PG_HOST}:${PG_PORT}/${PG_DATABASE}"
 bashio::log.info "MQTT: ${MQTT_HOST}:${MQTT_PORT}"
 

@@ -92,6 +92,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   .rule-badge {
     padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;
   }
+  .badge-default { background: #455a64; color: #fff; }
   .badge-user { background: #1565c0; color: #fff; }
   .badge-ml { background: #7b1fa2; color: #fff; }
   .badge-approved { background: #2e7d32; color: #fff; }
@@ -251,7 +252,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <div>
         <h2 style="font-size:1.1rem">ML Forslag</h2>
         <p style="color:#888;font-size:0.85rem;margin-top:4px">
-          Baseret paa aktivitetsmoenstre foreslaar AI nye automationer
+          Baseret paa aktivitetsmoenstre foreslaar AI nye automationer.
+          Moenstre opdateres hvert 30. minut, ML analyserer hver 6. time.
         </p>
       </div>
       <button class="btn btn-secondary" onclick="runAnalysis()">Analyser nu</button>
@@ -259,12 +261,53 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <div id="ml-list"><span class="loading">Indlaeser...</span></div>
   </div>
 
-  <!-- ══ PATTERNS TAB ══ -->
+  <!-- ══ PATTERNS TAB (Learning Details) ══ -->
   <div id="tab-patterns" class="tab-content">
-    <h2 style="font-size:1.1rem;margin-bottom:8px">Aktivitetsmoenstre</h2>
+    <h2 style="font-size:1.1rem;margin-bottom:4px">Hvad systemet laerer</h2>
     <p style="color:#888;font-size:0.85rem;margin-bottom:16px">
-      Belaegning per rum, ugedag og time (laert fra sensordata)
+      Systemet laerer fra sensordata (bevaegelsessensorer, BLE bluetooth, radar).
+      Hvert 30. minut analyseres data og moenstre opdateres. ML koerer hver 6. time.
     </p>
+
+    <!-- How it works section -->
+    <div class="card" style="margin-bottom:16px;border-left:3px solid #64b5f6">
+      <h2 style="cursor:pointer" onclick="document.getElementById('how-it-works').style.display=document.getElementById('how-it-works').style.display==='none'?'block':'none'">
+        Hvordan virker det? (klik for detaljer)
+      </h2>
+      <div id="how-it-works" style="display:none;margin-top:12px;font-size:0.85rem;line-height:1.6;color:#bbb">
+        <p><b>1. Dataindsaming:</b> Sensor fusion kombinerer data fra EPL mmWave radar, BLE Bluetooth naerhed (Bermuda), og composite sensorer. Naar et rum skifter mellem optaget/tomt logges en <code>occupancy_change</code> haendelse i databasen.</p>
+        <p style="margin-top:8px"><b>2. Moenstre:</b> Hvert 30. minut aggregerer systemet de seneste 7 dages haendelser til moenstre per rum, per ugedag, per time. Fx: "Koekken er optaget mandag kl. 8 i 73% af tilfaeldene (baseret paa 15 observationer)".</p>
+        <p style="margin-top:8px"><b>3. Laeringsmetode:</b> Nye observationer blandes med gamle vaerdier via eksponentielt vaegtet gennemsnit: <code>ny_vaerdi = gammel * 0.7 + observation * 0.3</code>. Det betyder at systemet laerer gradvist og nyere data vejer mere.</p>
+        <p style="margin-top:8px"><b>4. ML Analyse:</b> Hver 6. time scanner ML motoren alle moenstre og leder efter staerke signaler:</p>
+        <ul style="margin-left:20px;margin-top:4px">
+          <li>Mindst <b>10 datapunkter</b> foer et moenster er paalideligt</li>
+          <li>Over <b>60% belaegning</b> = "altid optaget" moenster</li>
+          <li>Under <b>40% belaegning</b> = "altid tomt" moenster</li>
+          <li>Score over <b>70%</b> = forslag genereres automatisk</li>
+        </ul>
+        <p style="margin-top:8px"><b>5. Score beregning:</b> Score = belaegningsprocent (vaegt 50%) + antal datapunkter (vaegt 30%, max 50 stk) + sammenhaegende timer (vaegt 20%, max 4 timer)</p>
+        <p style="margin-top:8px"><b>6. Forslag:</b> ML foreslaar automationer som du kan godkende, tilpasse eller afvise under ML Forslag fanen. Godkendte regler koerer automatisk.</p>
+      </div>
+    </div>
+
+    <!-- Data overview -->
+    <div class="grid" style="margin-bottom:16px">
+      <div class="card">
+        <h2>Datamangde</h2>
+        <div id="learning-data-stats"><span class="loading">Indlaeser...</span></div>
+      </div>
+      <div class="card">
+        <h2>ML Motor Status</h2>
+        <div id="learning-ml-status"><span class="loading">Indlaeser...</span></div>
+      </div>
+    </div>
+
+    <!-- Per room details -->
+    <h2 style="font-size:1rem;margin-bottom:12px;color:#aaa">Laering per rum</h2>
+    <div id="learning-rooms"><span class="loading">Indlaeser...</span></div>
+
+    <!-- Heatmap for selected room -->
+    <h2 style="font-size:1rem;margin:20px 0 12px;color:#aaa">Belaegnings-heatmap</h2>
     <div class="form-group" style="max-width:240px;margin-bottom:16px">
       <select id="pattern-room" onchange="loadPatterns()">
         <option value="">Vaelg rum...</option>
@@ -395,7 +438,7 @@ document.querySelectorAll('.tab').forEach(t => {
     document.getElementById('tab-' + t.dataset.tab).classList.add('active');
     if (t.dataset.tab === 'rules') loadRules();
     if (t.dataset.tab === 'ml') loadML();
-    if (t.dataset.tab === 'patterns') initPatternRoom();
+    if (t.dataset.tab === 'patterns') loadLearning();
     if (t.dataset.tab === 'system') loadSystem();
   });
 });
@@ -473,6 +516,7 @@ async function loadRules() {
   list.innerHTML = rules.map(r => {
     const badge = r.source === 'ml_approved' ? '<span class="rule-badge badge-approved">ML</span>'
       : r.source === 'ml_suggested' ? '<span class="rule-badge badge-ml">Forslag</span>'
+      : r.source === 'default' ? '<span class="rule-badge badge-default">Standard</span>'
       : '<span class="rule-badge badge-user">Bruger</span>';
     const disabledBadge = !r.enabled ? ' <span class="rule-badge badge-disabled">Deaktiveret</span>' : '';
     const last = r.last_triggered ? new Date(r.last_triggered).toLocaleString('da-DK') : 'aldrig';
@@ -751,7 +795,7 @@ async function runAnalysis() {
   loadML();
 }
 
-// ── PATTERNS ──
+// ── PATTERNS / LEARNING ──
 function initPatternRoom() {
   const sel = document.getElementById('pattern-room');
   if (sel.options.length <= 1) {
@@ -763,6 +807,138 @@ function initPatternRoom() {
   }
 }
 
+async function loadLearning() {
+  initPatternRoom();
+  const data = await api('/learning/details');
+  if (!data) return;
+
+  // Data stats
+  const ds = document.getElementById('learning-data-stats');
+  const stats = data.data_stats || {};
+  if (stats.total_occupancy_events > 0) {
+    const oldest = stats.oldest_event ? new Date(stats.oldest_event).toLocaleDateString('da-DK') : '?';
+    const newest = stats.newest_event ? new Date(stats.newest_event).toLocaleString('da-DK') : '?';
+    ds.innerHTML = '<div class="room"><span>Occupancy events i alt</span><span><b>' + stats.total_occupancy_events + '</b></span></div>'
+      + '<div class="room"><span>Sidste 24 timer</span><span>' + stats.events_last_24h + '</span></div>'
+      + '<div class="room"><span>Sidste 7 dage</span><span>' + stats.events_last_7d + '</span></div>'
+      + '<div class="room"><span>Foerste observation</span><span>' + oldest + '</span></div>'
+      + '<div class="room"><span>Seneste observation</span><span>' + newest + '</span></div>'
+      + '<div style="margin-top:8px;padding:8px;background:#222;border-radius:6px;font-size:0.8rem;color:#999">'
+      + 'Data kommer fra: EPL mmWave radar, BLE Bluetooth (Bermuda), composite PIR/door sensorer. '
+      + 'Naar et rum skifter mellem optaget/tomt, logges en haendelse.'
+      + '</div>';
+  } else {
+    ds.innerHTML = '<div class="empty-state"><p>Ingen occupancy data endnu.</p>'
+      + '<p style="font-size:0.8rem;color:#666">Systemet venter paa at sensor fusion registrerer rumbevaeegelser. '
+      + 'Data kommer fra mmWave radar (EPL), BLE bluetooth naerhed og composite sensorer.</p></div>';
+  }
+
+  // ML status
+  const ml = document.getElementById('learning-ml-status');
+  const mls = data.ml_status || {};
+  let mlh = '';
+  if (mls.last_analysis) {
+    const ts = new Date(mls.last_analysis.timestamp).toLocaleString('da-DK');
+    mlh += '<div class="room"><span>Sidst analyseret</span><span>' + ts + '</span></div>';
+    mlh += '<div class="room"><span>Forslag genereret</span><span>' + (mls.last_analysis.suggestion_count||0) + '</span></div>';
+  } else {
+    mlh += '<div class="room"><span>Sidst analyseret</span><span style="color:#f44336">aldrig</span></div>';
+  }
+  mlh += '<div class="room"><span>Ventende forslag</span><span>' + (mls.pending_suggestions||0) + '</span></div>';
+  mlh += '<div class="room"><span>Godkendte ML-regler</span><span>' + (mls.approved_rules||0) + '</span></div>';
+  mlh += '<div style="margin-top:8px;padding:8px;background:#222;border-radius:6px;font-size:0.8rem;color:#999">'
+    + 'ML kraever mindst 10 datapunkter + >60% belaegning foer den foreslaar en automation. '
+    + 'Score = belaegning (50%) + datapunkter (30%) + sammenhaegende timer (20%). Tærskel: 70%.'
+    + '</div>';
+  ml.innerHTML = mlh;
+
+  // Per-room learning details
+  const roomsEl = document.getElementById('learning-rooms');
+  const rooms = data.rooms || {};
+  const roomKeys = Object.keys(rooms);
+
+  if (!roomKeys.length) {
+    roomsEl.innerHTML = '<div class="empty-state"><p>Ingen rumdata endnu. Vent paa at sensorer registrerer bevaegelse.</p></div>';
+    return;
+  }
+
+  roomsEl.innerHTML = roomKeys.map(rid => {
+    const r = rooms[rid];
+    const name = r.name || ROOMS[rid] || rid;
+    const ev = r.events || {};
+    const pat = r.patterns || {};
+    const sigs = r.top_signals || {};
+
+    // Progress bar for coverage
+    const cov = pat.coverage_pct || 0;
+    const covColor = cov > 50 ? '#4caf50' : cov > 20 ? '#ff9800' : '#f44336';
+
+    let html = '<div class="card" style="margin-bottom:12px">';
+    html += '<h2 style="font-size:1rem;margin-bottom:10px">' + esc(name) + '</h2>';
+
+    // Events summary
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">';
+    html += '<div style="background:#222;padding:8px;border-radius:6px">'
+      + '<div style="color:#888;font-size:0.7rem;text-transform:uppercase">Events</div>'
+      + '<div style="font-size:1.2rem;font-weight:600">' + (ev.total||0) + '</div>'
+      + '<div style="font-size:0.75rem;color:#888">' + (ev.occupied||0) + ' optaget / ' + (ev.clear||0) + ' tomt</div>'
+      + '</div>';
+    html += '<div style="background:#222;padding:8px;border-radius:6px">'
+      + '<div style="color:#888;font-size:0.7rem;text-transform:uppercase">Moenstre laert</div>'
+      + '<div style="font-size:1.2rem;font-weight:600">' + (pat.slots_learned||0) + '<span style="font-size:0.8rem;color:#888">/' + pat.total_slots + ' slots</span></div>'
+      + '<div style="height:4px;background:#333;border-radius:2px;margin-top:4px"><div style="height:100%;width:' + cov + '%;background:' + covColor + ';border-radius:2px"></div></div>'
+      + '<div style="font-size:0.75rem;color:#888">' + cov + '% daekket | ' + (pat.total_samples||0) + ' samples</div>'
+      + '</div>';
+    html += '</div>';
+
+    // Stats row
+    if (pat.slots_learned > 0) {
+      html += '<div style="display:flex;gap:12px;margin-bottom:10px;font-size:0.8rem">';
+      html += '<span style="color:#888">Gns. belaegning: <b style="color:#e1e1e1">' + (pat.avg_occupancy||0) + '%</b></span>';
+      html += '<span style="color:#888">Max: <b style="color:#4caf50">' + (pat.max_occupancy||0) + '%</b></span>';
+      html += '<span style="color:#888">Staerke optaget-slots: <b style="color:#e1e1e1">' + (pat.strong_occupied_slots||0) + '</b></span>';
+      html += '<span style="color:#888">Staerke tom-slots: <b style="color:#e1e1e1">' + (pat.strong_empty_slots||0) + '</b></span>';
+      html += '</div>';
+    }
+
+    // Top signals
+    if (sigs.most_occupied && sigs.most_occupied.length) {
+      html += '<div style="margin-bottom:8px">';
+      html += '<div style="color:#4caf50;font-size:0.75rem;text-transform:uppercase;font-weight:600;margin-bottom:4px">Staerkeste "optaget" moenstre</div>';
+      sigs.most_occupied.forEach(s => {
+        html += '<div style="font-size:0.8rem;padding:3px 0;color:#bbb">'
+          + '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#4caf50;margin-right:6px"></span>'
+          + esc(s.description) + '</div>';
+      });
+      html += '</div>';
+    }
+
+    if (sigs.most_empty && sigs.most_empty.length) {
+      html += '<div style="margin-bottom:8px">';
+      html += '<div style="color:#666;font-size:0.75rem;text-transform:uppercase;font-weight:600;margin-bottom:4px">Staerkeste "tomt" moenstre</div>';
+      sigs.most_empty.forEach(s => {
+        html += '<div style="font-size:0.8rem;padding:3px 0;color:#888">'
+          + '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#555;margin-right:6px"></span>'
+          + esc(s.description) + '</div>';
+      });
+      html += '</div>';
+    }
+
+    if (!ev.total) {
+      html += '<div style="color:#666;font-size:0.85rem;font-style:italic">Ingen data endnu for dette rum</div>';
+    }
+
+    if (ev.first_seen) {
+      html += '<div style="font-size:0.7rem;color:#555;margin-top:6px">Data fra: ' + new Date(ev.first_seen).toLocaleDateString('da-DK') + ' til ' + new Date(ev.last_seen).toLocaleDateString('da-DK');
+      if (pat.last_updated) html += ' | Moenstre opdateret: ' + new Date(pat.last_updated).toLocaleString('da-DK');
+      html += '</div>';
+    }
+
+    html += '</div>';
+    return html;
+  }).join('');
+}
+
 async function loadPatterns() {
   const room = document.getElementById('pattern-room').value;
   const view = document.getElementById('patterns-view');
@@ -770,15 +946,17 @@ async function loadPatterns() {
 
   const data = await api('/patterns/' + room);
   if (!data || !data.length) {
-    view.innerHTML = '<div class="empty-state"><p>Ingen data endnu for dette rum</p></div>';
+    view.innerHTML = '<div class="empty-state"><p>Ingen moensterdata endnu for dette rum. Systemet har brug for occupancy_change events foer moenstre beregnes.</p></div>';
     return;
   }
 
   // Build heatmap grid: rows = days, cols = hours
   const grid = Array.from({length:7}, () => Array(24).fill(0));
+  const samples = Array.from({length:7}, () => Array(24).fill(0));
   data.forEach(p => {
     if (p.day_of_week >= 0 && p.day_of_week < 7 && p.hour >= 0 && p.hour < 24) {
       grid[p.day_of_week][p.hour] = p.occupancy_pct;
+      samples[p.day_of_week][p.hour] = p.sample_count;
     }
   });
 
@@ -792,16 +970,18 @@ async function loadPatterns() {
     html += '<div class="heatmap-label">' + DAYS_DA[d] + '</div>';
     for (let h = 0; h < 24; h++) {
       const v = grid[d][h];
+      const s = samples[d][h];
       const intensity = Math.min(v / 100, 1);
       const r = Math.round(30 + intensity * 46);
       const g = Math.round(30 + intensity * 125);
       const b = Math.round(30 + intensity * 50);
       const color = 'rgb(' + r + ',' + g + ',' + b + ')';
-      html += '<div class="heatmap-cell" style="background:' + color + '" title="' + DAYS_DA[d] + ' kl.' + h + ': ' + v.toFixed(0) + '%">'
+      html += '<div class="heatmap-cell" style="background:' + color + '" title="' + DAYS_DA[d] + ' kl.' + h + ': ' + v.toFixed(0) + '% optaget (' + s + ' samples)">'
         + (v > 0 ? v.toFixed(0) : '') + '</div>';
     }
   }
   html += '</div>';
+  html += '<div style="margin-top:8px;font-size:0.75rem;color:#666">Tal = procent optaget. Groen = hoej belaegning. Hover for detaljer inkl. antal datapunkter.</div>';
   view.innerHTML = html;
 }
 
@@ -934,7 +1114,18 @@ function esc(s) { const d = document.createElement('div'); d.textContent = s||''
 
 // ── Init ──
 loadOverview();
-setInterval(loadOverview, 15000);
+
+// Auto-refresh active tab every 10 seconds
+setInterval(() => {
+  const active = document.querySelector('.tab.active');
+  if (!active) return;
+  const tab = active.dataset.tab;
+  if (tab === 'overview') loadOverview();
+  else if (tab === 'rules') loadRules();
+  else if (tab === 'ml') loadML();
+  else if (tab === 'patterns') loadLearning();
+  else if (tab === 'system') loadSystem();
+}, 10000);
 </script>
 </body>
 </html>"""
