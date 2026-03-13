@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from app.database import Database
+    from database import Database
 
 logger = logging.getLogger(__name__)
 
