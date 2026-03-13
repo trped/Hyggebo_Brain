@@ -133,6 +133,29 @@ async def run_analysis(request: Request):
     return {"suggestions_created": count}
 
 
+@router.get("/debug/rules")
+async def debug_rules(request: Request):
+    """Debug: test rules table directly."""
+    db = getattr(request.app.state, "db", None)
+    rm = getattr(request.app.state, "rule_manager", None)
+    result = {
+        "db_connected": bool(db and db.is_connected),
+        "rule_manager_exists": rm is not None,
+    }
+    if db and db.is_connected:
+        try:
+            count = await db.fetchval("SELECT COUNT(*) FROM automation_rules")
+            result["rules_count"] = count
+            if count and count > 0:
+                first = await db.fetchrow(
+                    "SELECT id, name, source, enabled FROM automation_rules LIMIT 1"
+                )
+                result["first_rule"] = dict(first) if first else None
+        except Exception as e:
+            result["db_error"] = str(e)
+    return result
+
+
 @router.get("/patterns/{room_id}")
 async def room_patterns(request: Request, room_id: str):
     """Get activity patterns for a room."""

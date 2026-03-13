@@ -418,10 +418,13 @@ const DAYS_DA = ['Man','Tir','Ons','Tor','Fre','Lor','Son'];
 // ── API helper ──
 async function api(path, opts) {
   try {
-    const r = await fetch(API + path, opts);
-    if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.detail || r.statusText); }
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    const r = await fetch(API + path, Object.assign({signal: ctrl.signal}, opts || {}));
+    clearTimeout(timer);
+    if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error((e.detail || r.statusText) + ' (HTTP ' + r.status + ')'); }
     return await r.json();
-  } catch(e) { console.error('API error:', path, e); return null; }
+  } catch(e) { console.error('API error:', path, e.message || e); return null; }
 }
 async function apiPost(path, body) {
   return api(path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
@@ -512,13 +515,18 @@ async function loadOverview() {
 // ── RULES ──
 async function loadRules() {
   const list = document.getElementById('rules-list');
+  try {
   const rules = await api('/rules');
   if (rules === null) {
-    list.innerHTML = '<div class="empty-state" style="color:#f44336"><h3>Fejl ved indlaesning af regler</h3><p>API returnerede en fejl. Tjek at systemet er fuldt startet (database forbindelse kræves).</p></div>';
+    list.innerHTML = '<div class="empty-state" style="color:#f44336"><h3>Fejl ved indlaesning af regler</h3><p>API /rules returnerede fejl eller timeout. Tjek addon log i HA.</p></div>';
+    return;
+  }
+  if (!Array.isArray(rules)) {
+    list.innerHTML = '<div class="empty-state" style="color:#f44336"><h3>Uventet svar</h3><p>API returnerede: ' + esc(JSON.stringify(rules).substring(0,200)) + '</p></div>';
     return;
   }
   if (!rules.length) {
-    list.innerHTML = '<div class="empty-state"><h3>Ingen automationer endnu</h3><p>De 7 standard-regler oprettes automatisk ved foerste opstart. Har du opdateret til v0.6.0?</p></div>';
+    list.innerHTML = '<div class="empty-state"><h3>Ingen automationer i database</h3><p>De 7 standard-regler burde oprettes automatisk ved opstart. Tjek addon log for fejl.</p></div>';
     return;
   }
   list.innerHTML = rules.map(r => {
@@ -545,6 +553,10 @@ async function loadRules() {
       + '<button class="btn btn-danger btn-sm" onclick="deleteRule(' + r.id + ')">Slet</button>'
       + '</div></div>';
   }).join('');
+  } catch(err) {
+    list.innerHTML = '<div class="empty-state" style="color:#f44336"><h3>JS fejl</h3><p>' + esc(err.message || String(err)) + '</p></div>';
+    console.error('loadRules error:', err);
+  }
 }
 
 function conditionText(c) {
