@@ -15,6 +15,7 @@ from api.rooms import router as rooms_router
 from api.events import router as events_router
 from api.scenarios import router as scenarios_router
 from api.rules import router as rules_router
+from api.system import router as system_router
 from activity_tracker import ActivityTracker
 from cmd_handler import CommandHandler
 from database import Database
@@ -40,7 +41,7 @@ logger = logging.getLogger("hyggebo_brain")
 
 app = FastAPI(
     title="Hyggebo Brain",
-    version="0.4.0",
+    version="0.5.0",
     description="Smart home intelligence engine",
 )
 
@@ -50,6 +51,7 @@ app.include_router(rooms_router, prefix="/api")
 app.include_router(events_router, prefix="/api")
 app.include_router(scenarios_router, prefix="/api")
 app.include_router(rules_router, prefix="/api")
+app.include_router(system_router, prefix="/api")
 
 # Shared service instances
 db = Database(settings)
@@ -79,7 +81,7 @@ async def startup():
     global event_logger, fusion, ha_state_tracker, scenario_engine
     global cmd_handler, notifier, rule_manager, activity_tracker, ml_engine
 
-    logger.info("Hyggebo Brain v0.4.0 starting...")
+    logger.info("Hyggebo Brain v0.5.0 starting...")
 
     # 1. Database
     try:
@@ -105,7 +107,7 @@ async def startup():
     # 3. MQTT (EMQX)
     try:
         await mqtt.connect()
-        mqtt.publish_sensor("system", "starting", {"version": "0.4.0"})
+        mqtt.publish_sensor("system", "starting", {"version": "0.5.0"})
         logger.info("MQTT connected to EMQX")
     except Exception as e:
         logger.error(f"MQTT connection failed: {e}")
@@ -184,6 +186,7 @@ async def startup():
                 event_logger=event_logger,
                 cmd_handler=cmd_handler,
                 notifier=notifier,
+                rule_manager=rule_manager,
             )
             await scenario_engine.start()
             # Wire scenario engine into command handler
@@ -214,11 +217,11 @@ async def startup():
 
     # Mark system online
     if mqtt.connected:
-        mqtt.publish_sensor("system", "online", {"version": "0.4.0"})
+        mqtt.publish_sensor("system", "online", {"version": "0.5.0"})
 
     # Startup notification
     if notifier:
-        await notifier.notify_system("system_started", "Hyggebo Brain v0.4.0 er startet")
+        await notifier.notify_system("system_started", "Hyggebo Brain v0.5.0 er startet")
 
     logger.info("Startup complete.")
 

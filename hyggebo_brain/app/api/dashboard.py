@@ -206,6 +206,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <div class="tab" data-tab="rules">Automationer</div>
   <div class="tab" data-tab="ml">ML Forslag</div>
   <div class="tab" data-tab="patterns">Aktivitet</div>
+  <div class="tab" data-tab="system">System</div>
 </div>
 
 <div class="content">
@@ -270,6 +271,45 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       </select>
     </div>
     <div id="patterns-view"></div>
+  </div>
+
+  <!-- ══ SYSTEM TAB ══ -->
+  <div id="tab-system" class="tab-content">
+    <h2 style="font-size:1.1rem;margin-bottom:16px">System detaljer</h2>
+    <div class="grid">
+      <div class="card">
+        <h2>Database</h2>
+        <div id="sys-db"><span class="loading">Indlaeser...</span></div>
+      </div>
+      <div class="card">
+        <h2>Forbindelser</h2>
+        <div id="sys-conn"><span class="loading">Indlaeser...</span></div>
+      </div>
+      <div class="card">
+        <h2>Sensor fusion</h2>
+        <div id="sys-fusion"><span class="loading">Indlaeser...</span></div>
+      </div>
+      <div class="card">
+        <h2>BLE afstande</h2>
+        <div id="sys-ble"><span class="loading">Indlaeser...</span></div>
+      </div>
+      <div class="card">
+        <h2>Scenario engine</h2>
+        <div id="sys-engine"><span class="loading">Indlaeser...</span></div>
+      </div>
+      <div class="card">
+        <h2>ML / Laering</h2>
+        <div id="sys-ml"><span class="loading">Indlaeser...</span></div>
+      </div>
+      <div class="card">
+        <h2>Haendelser (24t)</h2>
+        <div id="sys-events"><span class="loading">Indlaeser...</span></div>
+      </div>
+      <div class="card">
+        <h2>Tabeller</h2>
+        <div id="sys-tables"><span class="loading">Indlaeser...</span></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -356,6 +396,7 @@ document.querySelectorAll('.tab').forEach(t => {
     if (t.dataset.tab === 'rules') loadRules();
     if (t.dataset.tab === 'ml') loadML();
     if (t.dataset.tab === 'patterns') initPatternRoom();
+    if (t.dataset.tab === 'system') loadSystem();
   });
 });
 
@@ -456,8 +497,10 @@ async function loadRules() {
 
 function conditionText(c) {
   if (c.type === 'time') return 'Kl. ' + (c.hour||0) + (c.day_of_week !== undefined ? ' (' + DAYS_DA[c.day_of_week] + ')' : '');
+  if (c.type === 'time_of_day') return 'Tid: ' + (c.value||'');
   if (c.type === 'room_occupied') return (ROOMS[c.room_id]||c.room_id) + ' optaget';
   if (c.type === 'room_empty') return (ROOMS[c.room_id]||c.room_id) + ' tom';
+  if (c.type === 'all_rooms_clear') return 'Alle rum tomme';
   if (c.type === 'person_home') return (PERSONS[c.person_id]||c.person_id) + ' hjemme';
   if (c.type === 'person_away') return (PERSONS[c.person_id]||c.person_id) + ' ude';
   if (c.type === 'state') return 'Tilstand: ' + (c.value||'');
@@ -531,7 +574,9 @@ function addCondition(data) {
     + '<option value="room_empty"' + (type==='room_empty'?' selected':'') + '>Rum tom</option>'
     + '<option value="person_home"' + (type==='person_home'?' selected':'') + '>Person hjemme</option>'
     + '<option value="person_away"' + (type==='person_away'?' selected':'') + '>Person ude</option>'
+    + '<option value="time_of_day"' + (type==='time_of_day'?' selected':'') + '>Tid paa dagen</option>'
     + '<option value="state"' + (type==='state'?' selected':'') + '>Hus tilstand</option>'
+    + '<option value="all_rooms_clear"' + (type==='all_rooms_clear'?' selected':'') + '>Alle rum tomme</option>'
     + '</select>'
     + '<div class="cond-params"></div>'
     + '<button class="remove-btn" onclick="this.parentElement.remove()">x</button>';
@@ -556,10 +601,16 @@ function updateCondRow(sel, data) {
     const pid = data ? data.person_id : '';
     params.innerHTML = '<select class="p-person">'
       + Object.entries(PERSONS).map(([k,v]) => '<option value="' + k + '"' + (pid===k?' selected':'') + '>' + v + '</option>').join('') + '</select>';
+  } else if (t === 'time_of_day') {
+    const v = data ? data.value : '';
+    params.innerHTML = '<select class="p-tod">'
+      + ['morgen','dag','aften','nat'].map(s => '<option value="' + s + '"' + (v===s?' selected':'') + '>' + s + '</option>').join('') + '</select>';
   } else if (t === 'state') {
     const v = data ? data.value : '';
     params.innerHTML = '<select class="p-state">'
       + ['hjemme','nat','ude','kun_hunde','ferie'].map(s => '<option value="' + s + '"' + (v===s?' selected':'') + '>' + s + '</option>').join('') + '</select>';
+  } else if (t === 'all_rooms_clear') {
+    params.innerHTML = '<span style="color:#888;font-size:0.85rem">Ingen parametre</span>';
   }
 }
 
@@ -576,6 +627,8 @@ function gatherConditions() {
       c.room_id = row.querySelector('.p-room').value;
     } else if (t === 'person_home' || t === 'person_away') {
       c.person_id = row.querySelector('.p-person').value;
+    } else if (t === 'time_of_day') {
+      c.value = row.querySelector('.p-tod').value;
     } else if (t === 'state') {
       c.value = row.querySelector('.p-state').value;
     }
@@ -750,6 +803,130 @@ async function loadPatterns() {
   }
   html += '</div>';
   view.innerHTML = html;
+}
+
+// ── SYSTEM ──
+async function loadSystem() {
+  const data = await api('/system/stats');
+  if (!data) return;
+
+  // Database
+  const dbe = document.getElementById('sys-db');
+  if (data.database) {
+    const db = data.database;
+    let h = '<div class="room"><span>Total stoerrelse</span><span><b>' + (db.total_size||'?') + '</b></span></div>';
+    if (db.partitions) {
+      h += Object.entries(db.partitions).map(([k,v]) =>
+        '<div class="room"><span>' + k + ' partitioner</span><span>' + v + '</span></div>'
+      ).join('');
+    }
+    h += '<div class="room"><span>Sensor aflaeesninger (24t)</span><span>' + (db.sensor_readings_24h||0) + '</span></div>';
+    if (db.rules_by_source) {
+      h += Object.entries(db.rules_by_source).map(([k,v]) =>
+        '<div class="room"><span>Regler (' + k + ')</span><span>' + v.count + ' (' + v.total_triggers + ' triggers)</span></div>'
+      ).join('');
+    }
+    dbe.innerHTML = h;
+  }
+
+  // Connections
+  const conn = document.getElementById('sys-conn');
+  const cd = await api('/system/connections');
+  if (cd) {
+    let h = '';
+    if (cd.database) {
+      const ok = cd.database.connected;
+      h += '<div class="status-line"><span class="status-dot ' + (ok?'ok':'err') + '"></span>PostgreSQL: ' + (ok?'tilsluttet':'afbrudt') + ' (pool: ' + cd.database.pool_free + '/' + cd.database.pool_size + ')</div>';
+    }
+    if (cd.mqtt) {
+      const ok = cd.mqtt.connected;
+      h += '<div class="status-line"><span class="status-dot ' + (ok?'ok':'err') + '"></span>MQTT: ' + (ok?'tilsluttet':'afbrudt') + ' (' + cd.mqtt.host + ':' + cd.mqtt.port + ')</div>';
+    }
+    if (cd.ha_websocket) {
+      const ok = cd.ha_websocket.connected;
+      h += '<div class="status-line"><span class="status-dot ' + (ok?'ok':'err') + '"></span>HA WebSocket: ' + (ok?'tilsluttet':'afbrudt') + '</div>';
+    }
+    conn.innerHTML = h;
+  }
+
+  // Fusion details
+  const fe = document.getElementById('sys-fusion');
+  if (data.fusion) {
+    fe.innerHTML = Object.entries(data.fusion.rooms).map(([id, r]) => {
+      const name = ROOMS[id] || id;
+      const occ = r.occupancy === 'occupied';
+      const zones = Object.entries(r.zones||{}).filter(([k,v])=>v).map(([k])=>k).join(', ');
+      let detail = '<b>' + r.source + '</b>';
+      if (r.epl_main !== null) detail += ' | EPL: ' + (r.epl_main ? 'ON' : 'off');
+      if (r.composite !== null) detail += ' | Comp: ' + (r.composite ? 'ON' : 'off');
+      if (zones) detail += ' | Zoner: ' + zones;
+      return '<div class="room"><span class="room-name">' + name + ' <small style="color:' + (occ?'#4caf50':'#666') + '">' + (occ?'OPTAGET':'tom') + '</small></span></div>'
+        + '<div style="padding:0 0 6px 0;font-size:0.8rem;color:#888;border-bottom:1px solid #333">' + detail + '</div>';
+    }).join('');
+  }
+
+  // BLE
+  const ble = document.getElementById('sys-ble');
+  if (data.fusion && data.fusion.ble_distances) {
+    const entries = Object.entries(data.fusion.ble_distances);
+    if (entries.length) {
+      ble.innerHTML = entries.map(([k,v]) => {
+        const close = v < 3;
+        return '<div class="room"><span>' + k.replace('@',' i ') + '</span><span style="color:' + (close?'#4caf50':'#666') + '">' + v + 'm</span></div>';
+      }).join('');
+    } else {
+      ble.innerHTML = '<span class="clear">Ingen BLE data</span>';
+    }
+  }
+
+  // Engine
+  const eng = document.getElementById('sys-engine');
+  if (data.scenario_engine) {
+    const se = data.scenario_engine;
+    eng.innerHTML = '<div class="room"><span>Evalueringer</span><span>' + se.eval_count + '</span></div>'
+      + '<div class="room"><span>Triggers totalt</span><span>' + se.trigger_count + '</span></div>'
+      + '<div class="room"><span>Aktive regler</span><span>' + se.cached_rules + '</span></div>';
+  }
+
+  // ML
+  const ml = document.getElementById('sys-ml');
+  if (data.ml) {
+    let h = '';
+    if (data.ml.last_analysis) {
+      h += '<div class="room"><span>Sidst analyseret</span><span>' + new Date(data.ml.last_analysis.timestamp).toLocaleString('da-DK') + '</span></div>';
+      h += '<div class="room"><span>Forslag genereret</span><span>' + (data.ml.last_analysis.suggestion_count||0) + '</span></div>';
+    } else {
+      h += '<div class="room"><span>Sidst analyseret</span><span>aldrig</span></div>';
+    }
+    h += '<div class="room"><span>Ventende forslag</span><span>' + (data.ml.pending_suggestions||0) + '</span></div>';
+    if (data.activity) {
+      h += '<div class="room"><span>Moenstre laert</span><span>' + data.activity.total_patterns + '</span></div>';
+      h += '<div class="room"><span>Rum med data</span><span>' + data.activity.rooms_with_data + '</span></div>';
+    }
+    ml.innerHTML = h;
+  }
+
+  // Events 24h
+  const eve = document.getElementById('sys-events');
+  if (data.database && data.database.events_24h) {
+    const entries = Object.entries(data.database.events_24h);
+    if (entries.length) {
+      eve.innerHTML = entries.map(([k,v]) =>
+        '<div class="room"><span>' + k + '</span><span>' + v + '</span></div>'
+      ).join('');
+    } else {
+      eve.innerHTML = '<span class="clear">Ingen haendelser</span>';
+    }
+  }
+
+  // Tables
+  const tbl = document.getElementById('sys-tables');
+  if (data.database && data.database.tables) {
+    tbl.innerHTML = data.database.tables
+      .filter(t => t.size_bytes > 0)
+      .map(t => '<div class="room"><span>' + t.name + '</span><span>' + t.size + ' (~' + t.estimated_rows + ' rk)</span></div>')
+      .join('');
+  }
 }
 
 // ── Utils ──
