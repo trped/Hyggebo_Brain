@@ -92,6 +92,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   .rule-badge {
     padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;
   }
+  .badge-default { background: #455a64; color: #fff; }
   .badge-user { background: #1565c0; color: #fff; }
   .badge-ml { background: #7b1fa2; color: #fff; }
   .badge-approved { background: #2e7d32; color: #fff; }
@@ -251,7 +252,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <div>
         <h2 style="font-size:1.1rem">ML Forslag</h2>
         <p style="color:#888;font-size:0.85rem;margin-top:4px">
-          Baseret paa aktivitetsmoenstre foreslaar AI nye automationer
+          Baseret paa aktivitetsmoenstre foreslaar AI nye automationer.
+          Moenstre opdateres hvert 30. minut, ML analyserer hver 6. time.
         </p>
       </div>
       <button class="btn btn-secondary" onclick="runAnalysis()">Analyser nu</button>
@@ -473,6 +475,7 @@ async function loadRules() {
   list.innerHTML = rules.map(r => {
     const badge = r.source === 'ml_approved' ? '<span class="rule-badge badge-approved">ML</span>'
       : r.source === 'ml_suggested' ? '<span class="rule-badge badge-ml">Forslag</span>'
+      : r.source === 'default' ? '<span class="rule-badge badge-default">Standard</span>'
       : '<span class="rule-badge badge-user">Bruger</span>';
     const disabledBadge = !r.enabled ? ' <span class="rule-badge badge-disabled">Deaktiveret</span>' : '';
     const last = r.last_triggered ? new Date(r.last_triggered).toLocaleString('da-DK') : 'aldrig';
@@ -934,7 +937,17 @@ function esc(s) { const d = document.createElement('div'); d.textContent = s||''
 
 // ── Init ──
 loadOverview();
-setInterval(loadOverview, 15000);
+
+// Auto-refresh active tab every 10 seconds
+setInterval(() => {
+  const active = document.querySelector('.tab.active');
+  if (!active) return;
+  const tab = active.dataset.tab;
+  if (tab === 'overview') loadOverview();
+  else if (tab === 'rules') loadRules();
+  else if (tab === 'ml') loadML();
+  else if (tab === 'system') loadSystem();
+}, 10000);
 </script>
 </body>
 </html>"""

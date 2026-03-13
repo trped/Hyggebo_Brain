@@ -104,6 +104,25 @@ async def startup():
     ml_engine = MLEngine(db, rule_manager, activity_tracker)
     logger.info("Rule manager, activity tracker, ML engine initialized")
 
+    # 2c. Seed default automation rules (always, regardless of HA/MQTT)
+    try:
+        from scenarios import DEFAULT_RULES
+        existing = await rule_manager.list_rules()
+        if not existing:
+            logger.info("Seeding %d default automation rules...", len(DEFAULT_RULES))
+            for rule in DEFAULT_RULES:
+                await rule_manager.create_rule(
+                    name=rule["name"],
+                    description=rule["description"],
+                    conditions=rule["conditions"],
+                    actions=rule["actions"],
+                    cooldown=rule["cooldown"],
+                    source="default",
+                )
+            logger.info("Default rules seeded")
+    except Exception as e:
+        logger.error(f"Failed to seed default rules: {e}")
+
     # 3. MQTT (EMQX)
     try:
         await mqtt.connect()
