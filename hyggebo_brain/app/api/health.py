@@ -34,7 +34,7 @@ async def health(request: Request):
 
     return {
         "status": status,
-        "version": "0.2.0",
+        "version": "0.3.0",
         "components": {
             "database": "connected" if db_ok else "disconnected",
             "mqtt": "connected" if mqtt_ok else "disconnected",
