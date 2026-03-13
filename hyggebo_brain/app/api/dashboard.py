@@ -239,10 +239,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
   <!-- ══ RULES TAB ══ -->
   <div id="tab-rules" class="tab-content">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
       <h2 style="font-size:1.1rem">Mine automationer</h2>
       <button class="btn btn-primary" onclick="openNewRule()">+ Ny automation</button>
     </div>
+    <p style="color:#888;font-size:0.8rem;margin-bottom:16px">
+      Aktive regler evalueres hvert 10. sekund og udforer handlinger via Home Assistant (taend/sluk lys, klima mm).
+      Standard-regler koerer med det samme — de afhaenger IKKE af ML laering.
+    </p>
     <div id="rules-list"><span class="loading">Indlaeser...</span></div>
   </div>
 
@@ -509,8 +513,12 @@ async function loadOverview() {
 async function loadRules() {
   const list = document.getElementById('rules-list');
   const rules = await api('/rules');
-  if (!rules || !rules.length) {
-    list.innerHTML = '<div class="empty-state"><h3>Ingen automationer endnu</h3><p>Opret din foerste automation med knappen ovenfor</p></div>';
+  if (rules === null) {
+    list.innerHTML = '<div class="empty-state" style="color:#f44336"><h3>Fejl ved indlaesning af regler</h3><p>API returnerede en fejl. Tjek at systemet er fuldt startet (database forbindelse kræves).</p></div>';
+    return;
+  }
+  if (!rules.length) {
+    list.innerHTML = '<div class="empty-state"><h3>Ingen automationer endnu</h3><p>De 7 standard-regler oprettes automatisk ved foerste opstart. Har du opdateret til v0.6.0?</p></div>';
     return;
   }
   list.innerHTML = rules.map(r => {
