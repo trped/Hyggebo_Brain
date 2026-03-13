@@ -12,12 +12,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hyggebo_brain.scheduler")
 
 
-def start_scheduler(db: "Database") -> asyncio.Task:
+def start_scheduler(db: "Database", activity_tracker=None, ml_engine=None) -> asyncio.Task:
     """Start the background maintenance scheduler."""
-    return asyncio.create_task(_scheduler_loop(db))
+    return asyncio.create_task(_scheduler_loop(db, activity_tracker, ml_engine))
 
 
-async def _scheduler_loop(db: "Database") -> None:
+async def _scheduler_loop(db: "Database", activity_tracker=None, ml_engine=None) -> None:
     """Run maintenance tasks every 6 hours."""
     # Wait 60 seconds before first run (let system stabilize)
     await asyncio.sleep(60)
@@ -27,6 +27,22 @@ async def _scheduler_loop(db: "Database") -> None:
             await _run_maintenance(db)
         except Exception:
             logger.exception("Scheduler maintenance error")
+
+        # Update activity patterns and run ML analysis
+        if activity_tracker:
+            try:
+                await activity_tracker.update_patterns()
+                logger.info("Activity patterns updated")
+            except Exception:
+                logger.exception("Activity pattern update error")
+
+        if ml_engine:
+            try:
+                count = await ml_engine.create_suggestion_rules()
+                if count:
+                    logger.info("ML engine created %d new suggestions", count)
+            except Exception:
+                logger.exception("ML analysis error")
 
         # Sleep 6 hours
         await asyncio.sleep(6 * 3600)

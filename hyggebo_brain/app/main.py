@@ -9,10 +9,13 @@ import uvicorn
 from fastapi import FastAPI
 
 from config import Settings
+from api.dashboard import router as dashboard_router
 from api.health import router as health_router
 from api.rooms import router as rooms_router
 from api.events import router as events_router
 from api.scenarios import router as scenarios_router
+from api.rules import router as rules_router
+from activity_tracker import ActivityTracker
 from cmd_handler import CommandHandler
 from database import Database
 from discovery import publish_discovery, remove_discovery
@@ -21,7 +24,9 @@ from fusion import SensorFusion
 from ha_client import HAClient
 from ha_state import HAStateTracker
 from mqtt_client import MQTTClient
+from ml_engine import MLEngine
 from notifications import NotificationService
+from rule_manager import RuleManager
 from schema.init_schema import init_schema, ensure_partitions, ensure_event_partitions
 
 settings = Settings()
@@ -39,10 +44,12 @@ app = FastAPI(
     description="Smart home intelligence engine",
 )
 
+app.include_router(dashboard_router)
 app.include_router(health_router, prefix="/api")
 app.include_router(rooms_router, prefix="/api")
 app.include_router(events_router, prefix="/api")
 app.include_router(scenarios_router, prefix="/api")
+app.include_router(rules_router, prefix="/api")
 
 # Shared service instances
 db = Database(settings)
@@ -61,13 +68,16 @@ ha_state_tracker: HAStateTracker | None = None
 cmd_handler: CommandHandler | None = None
 notifier: NotificationService | None = None
 scenario_engine = None  # initialized in startup
+rule_manager: RuleManager | None = None
+activity_tracker: ActivityTracker | None = None
+ml_engine: MLEngine | None = None
 
 
 @app.on_event("startup")
 async def startup():
     """Initialize all connections on startup."""
     global event_logger, fusion, ha_state_tracker, scenario_engine
-    global cmd_handler, notifier
+    global cmd_handler, notifier, rule_manager, activity_tracker, ml_engine
 
     logger.info("Hyggebo Brain v0.3.0 starting...")
 
@@ -85,6 +95,12 @@ async def startup():
     # 2. Event logger (needs DB)
     event_logger = EventLogger(db)
     logger.info("Event logger initialized")
+
+    # 2b. Rule manager + activity tracker + ML engine (needs DB)
+    rule_manager = RuleManager(db)
+    activity_tracker = ActivityTracker(db)
+    ml_engine = MLEngine(db, rule_manager, activity_tracker)
+    logger.info("Rule manager, activity tracker, ML engine initialized")
 
     # 3. MQTT (EMQX)
     try:
@@ -179,8 +195,8 @@ async def startup():
 
     # 11. Partition cleanup scheduler
     from scheduler import start_scheduler
-    start_scheduler(db)
-    logger.info("Partition cleanup scheduler started")
+    start_scheduler(db, activity_tracker=activity_tracker, ml_engine=ml_engine)
+    logger.info("Scheduler started (partitions + ML)")
 
     # Make services available to API routes
     app.state.db = db
@@ -192,6 +208,9 @@ async def startup():
     app.state.cmd_handler = cmd_handler
     app.state.notifier = notifier
     app.state.scenario_engine = scenario_engine
+    app.state.rule_manager = rule_manager
+    app.state.activity_tracker = activity_tracker
+    app.state.ml_engine = ml_engine
 
     # Mark system online
     if mqtt.connected:
