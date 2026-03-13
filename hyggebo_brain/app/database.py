@@ -10,7 +10,7 @@ from typing import Optional
 
 import asyncpg
 
-from app.config import Settings
+from config import Settings
 
 logger = logging.getLogger(__name__)
 

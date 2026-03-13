@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from app.database import Database
+    from database import Database
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +118,7 @@ async def init_schema(db: "Database") -> None:
 
 async def ensure_partitions(db: "Database", months_ahead: int = 2) -> None:
     """Create monthly sensor_data partitions for current + future months."""
-    now = datetime.utcnow()
+    now = datetime.now()
     for offset in range(months_ahead + 1):
         month = now.month + offset
         year = now.year
@@ -136,7 +136,7 @@ async def ensure_partitions(db: "Database", months_ahead: int = 2) -> None:
 
 async def ensure_event_partitions(db: "Database", weeks_ahead: int = 4) -> None:
     """Create weekly event partitions for current + future weeks."""
-    now = datetime.utcnow()
+    now = datetime.now()
     # Start from Monday of current week
     monday = now - timedelta(days=now.weekday())
     monday = monday.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -153,8 +153,8 @@ async def ensure_event_partitions(db: "Database", weeks_ahead: int = 4) -> None:
 
 async def drop_old_partitions(db: "Database", sensor_days: int = 90, event_days: int = 365) -> None:
     """Drop partitions older than retention thresholds."""
-    sensor_cutoff = datetime.utcnow() - timedelta(days=sensor_days)
-    event_cutoff = datetime.utcnow() - timedelta(days=event_days)
+    sensor_cutoff = datetime.now() - timedelta(days=sensor_days)
+    event_cutoff = datetime.now() - timedelta(days=event_days)
 
     # Find and drop old sensor_data partitions
     rows = await db.fetch(
