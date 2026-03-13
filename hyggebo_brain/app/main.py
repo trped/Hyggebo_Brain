@@ -9,6 +9,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from config import Settings
+from api.dashboard import router as dashboard_router
 from api.health import router as health_router
 from api.rooms import router as rooms_router
 from api.events import router as events_router
@@ -39,6 +40,7 @@ app = FastAPI(
     description="Smart home intelligence engine",
 )
 
+app.include_router(dashboard_router)
 app.include_router(health_router, prefix="/api")
 app.include_router(rooms_router, prefix="/api")
 app.include_router(events_router, prefix="/api")
